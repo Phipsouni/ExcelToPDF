@@ -167,7 +167,7 @@ def convert_workbook(excel_app, file_path, pdf_path, mode):
 def main():
     while True:
         print("\n" + "=" * 50)
-        print("   МАСТЕР ЭКСПОРТА EXCEL -> PDF")
+        print("   УТИЛИТА ЭКСПОРТА EXCEL -> PDF")
         print("=" * 50)
 
         print("Выберите действие:")
@@ -215,4 +215,5 @@ if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
+
         print("\nПрограмма остановлена пользователем.")
