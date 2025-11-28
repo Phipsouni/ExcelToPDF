@@ -15,7 +15,8 @@
 - Windows OS
 - Microsoft Excel (установленный)
 - Python 3.x
-- Установленная библиотека pywin32 (pip install pywin32)
+- Установленная библиотека pywin32 (pip install pywin32):
+После скачивания утилиты запустите файл "Install requirements.bat" для установки библиотек
 
 Batch Excel Processor: Скрипт рекурсивно обходит директории в поисках файлов .xlsx с ключевым словом "invoice"
 Парсит номера файлов и сверяет их с пользовательским диапазоном
