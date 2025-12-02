@@ -1,7 +1,8 @@
 import os
 import win32com.client as win32
 import sys
-
+import re  # Библиотека для регулярных выражений
+import time # Библиотека для пауз
 
 # ==========================================
 # ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
@@ -9,11 +10,14 @@ import sys
 
 def get_clean_path(prompt_text):
     """Запрашивает путь у пользователя и удаляет кавычки."""
-    path = input(f"{prompt_text}: ").strip()
-    # Удаляем кавычки в начале и конце
-    if (path.startswith('"') and path.endswith('"')) or (path.startswith("'") and path.endswith("'")):
-        path = path[1:-1]
-    return path
+    try:
+        path = input(f"{prompt_text}: ").strip()
+        # Удаляем кавычки в начале и конце
+        if (path.startswith('"') and path.endswith('"')) or (path.startswith("'") and path.endswith("'")):
+            path = path[1:-1]
+        return path
+    except EOFError:
+        return ""
 
 
 def parse_range(range_str):
@@ -60,37 +64,54 @@ def process_excel_files(source_folder, file_numbers, mode):
         # Проход по файлам
         for root, _, files in os.walk(source_folder):
             for file in files:
-                # Фильтр по расширениям и имени
-                if "invoice" in file.lower() and file.lower().endswith(('.xlsx', '.xls', '.xlsm')):
+                
+                # 1. Проверка расширения файла
+                if not file.lower().endswith(('.xlsx', '.xls', '.xlsm')):
+                    continue
 
-                    # Извлечение номера файла
-                    file_num_str = ''.join(filter(str.isdigit, file))
-                    if not file_num_str:
-                        continue
+                # 2. СТРОГАЯ ПРОВЕРКА ИМЕНИ (Regex)
+                # Получаем имя файла без расширения
+                name_body = os.path.splitext(file)[0]
+                
+                # Логика:
+                # ^ - начало строки
+                # invoice - слово invoice (регистр игнорируем благодаря re.IGNORECASE)
+                # \s+ - один или более пробелов
+                # \d+ - одна или более цифр
+                # $ - конец строки (чтобы после цифр ничего не было)
+                if not re.fullmatch(r'invoice\s+\d+', name_body, re.IGNORECASE):
+                    # Если имя не "invoice 123", пропускаем молча (или можно раскомментировать print ниже для отладки)
+                    # print(f"Пропущен файл (неверный формат имени): {file}")
+                    continue
 
-                    try:
-                        file_num = int(file_num_str)
-                    except ValueError:
-                        continue
+                # Извлечение номера файла для проверки диапазона
+                file_num_str = ''.join(filter(str.isdigit, file))
+                if not file_num_str:
+                    continue
 
-                    if file_num in file_numbers:
-                        full_path = os.path.join(root, file)
+                try:
+                    file_num = int(file_num_str)
+                except ValueError:
+                    continue
 
-                        # Путь сохранения - ВСЕГДА рядом с исходным файлом
-                        pdf_name = os.path.splitext(file)[0] + ".pdf"
-                        save_path = os.path.join(root, pdf_name)
+                if file_num in file_numbers:
+                    full_path = os.path.join(root, file)
 
-                        print(f"➡️ Обработка: {file}")
+                    # Путь сохранения - ВСЕГДА рядом с исходным файлом
+                    pdf_name = os.path.splitext(file)[0] + ".pdf"
+                    save_path = os.path.join(root, pdf_name)
 
-                        # --- КОНВЕРТАЦИЯ ---
-                        if convert_workbook(excel, full_path, save_path, mode):
-                            count_success += 1
-                            print(f"   ✅ Готово: {save_path}")
-                        else:
-                            print(f"   ❌ Ошибка конвертации")
+                    print(f"➡️ Обработка: {file}")
+
+                    # --- КОНВЕРТАЦИЯ ---
+                    if convert_workbook(excel, full_path, save_path, mode):
+                        count_success += 1
+                        print(f"   ✅ Готово: {save_path}")
+                    else:
+                        print(f"   ❌ Ошибка конвертации")
 
         print(f"\n🏁 ИТОГ: Успешно создано файлов: {count_success}")
-        print("-" * 30)  # Разделитель для визуальной чистоты перед возвратом в меню
+        print("-" * 30)
 
     except Exception as e:
         print(f"🔥 Критическая ошибка Excel: {e}")
@@ -113,18 +134,17 @@ def convert_workbook(excel_app, file_path, pdf_path, mode):
             return False
 
         # 1. Формируем список листов для экспорта
-        # Всегда берем первые два листа
         sheets_to_export = [wb.Sheets(1), wb.Sheets(2)]
         sheet_names = [wb.Sheets(1).Name, wb.Sheets(2).Name]
 
         # Если выбран режим 2 (с весовыми сертификатами)
         if mode == '2':
             target_names = ["Weight certificate (LI)", "Weight certificate (Y)"]
-            XL_SHEET_VISIBLE = -1
+            XL_SHEET_VISIBLE = -1 # Константа Excel для видимого листа
 
             for sheet in wb.Sheets:
+                # Проверяем имя и видимость (скрытые листы печатать нельзя)
                 if sheet.Name in target_names and sheet.Visible == XL_SHEET_VISIBLE:
-                    # Проверяем, чтобы не добавить дубликат
                     if sheet.Name not in sheet_names:
                         sheets_to_export.append(sheet)
                         sheet_names.append(sheet.Name)
@@ -136,14 +156,12 @@ def convert_workbook(excel_app, file_path, pdf_path, mode):
                 if print_area:
                     sheet.PageSetup.PrintArea = str(print_area)
             except:
-                pass  # Если ошибка в R1, просто игнорируем
+                pass
 
         # 3. Выделение листов
-        # Сначала снимаем выделение со всего, выбрав первый целевой лист
         wb.Sheets(sheet_names[0]).Select()
-        # Добавляем остальные к выделению
         for i in range(1, len(sheet_names)):
-            wb.Sheets(sheet_names[i]).Select(False)  # False = добавить к текущему выделению
+            wb.Sheets(sheet_names[i]).Select(False)
 
         # 4. Экспорт
         wb.ActiveSheet.ExportAsFixedFormat(0, pdf_path)  # 0 = PDF
@@ -177,43 +195,44 @@ def main():
 
         mode_choice = input("\nВаш выбор (0-2): ").strip()
 
-        # Обработка выхода
         if mode_choice == '0':
             print("Всего доброго!")
             break
 
-        # Проверка корректности ввода
         if mode_choice not in ['1', '2']:
-            print("❌ Ошибка: Неверный выбор. Пожалуйста, введите 1, 2 или 0.")
-            continue  # Возврат в начало цикла
+            print("❌ Ошибка: Неверный выбор. Введите 1, 2 или 0.")
+            continue
 
-        # Шаг 2: Путь к инвойсам
-        source_path = get_clean_path("\nУкажите путь к директории (или введите 'menu' для отмены)")
-
-        # Возможность вернуться в меню, если передумали на этапе ввода пути
+        source_path = get_clean_path("\nУкажите путь к директории (или 'menu' для отмены)")
         if source_path.lower() == 'menu':
             continue
 
         if not os.path.isdir(source_path):
             print("❌ Ошибка: Указанная папка не существует.")
-            continue  # Возврат в начало цикла
+            continue
 
-        # Шаг 3: Диапазон
         range_input = input("Укажите диапазон номеров (например: 3550-3553,3560): ").strip()
         file_numbers = parse_range(range_input)
         if not file_numbers:
             print("❌ Не указан корректный диапазон.")
-            continue  # Возврат в начало цикла
+            continue
 
-        # Запуск процесса
         process_excel_files(source_path, file_numbers, mode_choice)
-
-        # После завершения функции процесс не умирает, а цикл while True возвращает нас в начало
 
 
 if __name__ == "__main__":
     try:
         main()
     except KeyboardInterrupt:
-
         print("\nПрограмма остановлена пользователем.")
+    except Exception as e:
+        # ЭТОТ БЛОК ПОКАЖЕТ ОШИБКУ, ЕСЛИ ОНА ЕСТЬ
+        print("\n" + "!"*50)
+        print(f"КРИТИЧЕСКАЯ ОШИБКА: {e}")
+        print("!"*50)
+        import traceback
+        traceback.print_exc()
+    finally:
+        # ЭТА СТРОКА НЕ ДАСТ ОКНУ ЗАКРЫТЬСЯ
+        print("\nРабота завершена.")
+        input("Нажмите Enter, чтобы закрыть окно...")
